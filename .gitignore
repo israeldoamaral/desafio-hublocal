@@ -7,8 +7,7 @@
 # -----------------------------------------------------------------------------
 .env
 *.env
-chatwoot/.env
-espocrm/.env
+!.env.exemplo
 
 # Certificados e chaves
 *.pem
