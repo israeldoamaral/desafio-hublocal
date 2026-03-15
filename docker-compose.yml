@@ -253,8 +253,6 @@ services:
       REDIS_URL: ${REDIS_URL}
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
-      # POSTGRES_DB: ${POSTGRES_DB}
-      # POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_DATABASE: ${POSTGRES_DATABASE}
       POSTGRES_USERNAME: ${POSTGRES_USERNAME}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -363,15 +361,7 @@ services:
       # - "traefik.http.routers.espocrm.middlewares=secure-headers@file,compress@file"
       - "traefik.docker.network=traefik-public"
 
-      # - "traefik.enable=true"
-      # - "traefik.http.routers.espocrm.rule=Host(`${ESPOCRM_DOMAIN}`)"
-      # - "traefik.http.routers.espocrm.entrypoints=web"
-      # - "traefik.http.routers.espocrm.middlewares=secure-headers@file,compress@file"
-      # - "traefik.http.services.espocrm.loadbalancer.server.port=80"
-      # - "traefik.http.services.espocrm.loadbalancer.healthcheck.path=/api/v1/App/about"
-      # - "traefik.http.services.espocrm.loadbalancer.healthcheck.interval=30s"
     healthcheck:
-      # test: ["CMD-SHELL", "curl -f http://localhost/index.php || exit 1"]
       test: ["CMD-SHELL", "ps aux | grep '[a]pache2' || exit 1"]
       interval: 30s
       timeout: 15s
@@ -442,15 +432,9 @@ services:
     volumes:
       - espocrm-data:/var/www/html
     labels:
-      # - "traefik.enable=true"
-      # - "traefik.http.routers.espocrm-ws.rule=Host(`${ESPOCRM_DOMAIN}`)  && PathPrefix(`/ws`)"
-      # - "traefik.http.routers.espocrm-ws.entrypoints=web"
-      # - "traefik.http.services.espocrm-ws.loadbalancer.server.port=8080"
-      # - "traefik.docker.network=traefik-public"
-
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
-      
+   
       # Rota para capturar o tráfego no path /ws
       - "traefik.http.routers.espocrm-ws.rule=Host(`${ESPOCRM_DOMAIN}`) && PathPrefix(`/ws`)"
       - "traefik.http.routers.espocrm-ws.entrypoints=websecure" # Recomendado usar a porta 443 (SSL)
