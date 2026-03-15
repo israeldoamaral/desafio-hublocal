@@ -43,17 +43,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.dashboard.rule=Host(`${TRAEFIK_DOMAIN}`)"
-      # - "traefik.http.routers.dashboard.rule=Host(`traefik.israeldoamaral.cloud`)"
       - "traefik.http.routers.dashboard.service=api@internal"
       - "traefik.http.routers.dashboard.middlewares=auth"
       - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USER}"
-      # - "traefik.http.middlewares.auth.basicauth.users=admin:$$apr1$$JKuoJ8QX$$Mas1PPIWiGus4ZNEcZju80"
+      - "traefik.docker.network=traefik-public"
 
-      # - "traefik.enable=true"
-      # - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DOMAIN}`)"
-      # - "traefik.http.routers.traefik-dashboard.entrypoints=web"
-      # - "traefik.http.routers.traefik-dashboard.service=api@internal"
-      # - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth@file,secure-headers@file"
     healthcheck:
       test: ["CMD-SHELL", "traefik healthcheck --ping || exit 1"]
       interval: 30s
@@ -206,8 +200,6 @@ services:
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_DATABASE: ${POSTGRES_DATABASE}
       POSTGRES_USERNAME: ${POSTGRES_USERNAME}
-      # POSTGRES_DB: ${POSTGRES_DB}
-      # POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE}
 
@@ -366,6 +358,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.espocrm.rule=Host(`${ESPOCRM_DOMAIN}`)"
       - "traefik.http.routers.espocrm.entrypoints=web"
+      # - "traefik.http.routers.espocrm.tls=true"
       - "traefik.http.services.espocrm.loadbalancer.server.port=80"
       # - "traefik.http.routers.espocrm.middlewares=secure-headers@file,compress@file"
       - "traefik.docker.network=traefik-public"
