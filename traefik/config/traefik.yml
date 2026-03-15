@@ -1,0 +1,26 @@
+# =============================================================================
+# TRAEFIK - CONFIGURAÇÃO ESTÁTICA (traefik.yml)
+# TLS terminado no ALB da AWS (ACM). Traefik opera em HTTP puro internamente.
+# =============================================================================
+log:
+  level: DEBUG
+  format: json
+
+api:
+  dashboard: true
+
+ping:
+  entryPoint: "web"
+  
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+  file:
+    filename: /etc/traefik/dynamic/dynamic.yml

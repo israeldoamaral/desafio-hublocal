@@ -1,0 +1,544 @@
+# =============================================================================
+# DOCKER COMPOSE - STACK PRINCIPAL
+# Traefik + Chatwoot + EspoCRM
+# =============================================================================
+# Versão: 1.0.0
+# Última atualização: 2026
+# =============================================================================
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+
+# =============================================================================
+# SERVIÇOS
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # TRAEFIK - Reverse Proxy
+  # ---------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    <<: *restart-policy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/config/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/config/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      # - "traefik.http.routers.dashboard.rule=Host(`traefik.israeldoamaral.cloud`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_USER}"
+      # - "traefik.http.middlewares.auth.basicauth.users=admin:$$apr1$$JKuoJ8QX$$Mas1PPIWiGus4ZNEcZju80"
+
+      # - "traefik.enable=true"
+      # - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      # - "traefik.http.routers.traefik-dashboard.entrypoints=web"
+      # - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      # - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth@file,secure-headers@file"
+    healthcheck:
+      test: ["CMD-SHELL", "traefik healthcheck --ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # CHATWOOT - PostgreSQL
+  # ---------------------------------------------------------------------------
+  chatwoot-postgres:
+    image: pgvector/pgvector:pg15
+    container_name: chatwoot-postgres
+    <<: *restart-policy
+    user: "70:70"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+      POSTGRES_USER: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - chatwoot-postgres-data:/var/lib/postgresql/data
+    networks:
+      - chatwoot-db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME} -d ${POSTGRES_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # CHATWOOT - Redis
+  # ---------------------------------------------------------------------------
+  chatwoot-redis:
+    image: redis:7-alpine
+    container_name: chatwoot-redis
+    <<: *restart-policy
+    user: "999:999"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: ${REDIS_URL}
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - chatwoot-redis-data:/data
+    networks:
+      - chatwoot-backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging: *default-logging
+
+
+# ---------------------------------------------------------------------------
+  # CHATWOOT - Migrate (roda uma vez e sai)
+  # ---------------------------------------------------------------------------
+  chatwoot-migrate:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot-migrate
+    # user: "70:70"
+    environment:
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      RAILS_ENV: ${RAILS_ENV}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: ${REDIS_URL}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      FRONTEND_URL: https://${CHATWOOT_DOMAIN}
+
+    # command: bundle exec rails db:chatwoot_prepare
+    command: >
+      sh -c "if [ ! -f /app/storage/migration.lock ]; then
+               echo 'Rodando migrações do Chatwoot...' &&
+               bundle exec rails db:chatwoot_prepare &&
+               touch /app/storage/migration.lock &&
+               echo 'Migração concluída com sucesso.';
+             else
+               echo 'Migração já realizada anteriormente. Nada a fazer.';
+             fi"
+    volumes:
+      - chatwoot-storage:/app/storage
+    networks:
+      - chatwoot-backend
+      - chatwoot-db
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # CHATWOOT - Rails App (Web)
+  # ---------------------------------------------------------------------------
+  chatwoot-web:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot-web
+    <<: *restart-policy
+    environment:
+      FRONTEND_URL: https://${CHATWOOT_DOMAIN}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      REDIS_URL: ${REDIS_URL}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      # POSTGRES_DB: ${POSTGRES_DB}
+      # POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE}
+
+    command: bundle exec rails s -p 3000 -b 0.0.0.0
+    volumes:
+      - chatwoot-storage:/app/storage
+    networks:
+      - traefik-public
+      - chatwoot-backend
+      - chatwoot-db
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+      chatwoot-migrate:
+        condition: service_completed_successfully
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.chatwoot.rule=Host(`${CHATWOOT_DOMAIN}`)"
+      - "traefik.http.routers.chatwoot.entrypoints=web"
+      - "traefik.http.services.chatwoot.loadbalancer.server.port=3000"
+      - "traefik.http.routers.chatwoot.middlewares=secure-headers@file,compress@file"
+      - "traefik.docker.network=traefik-public"
+ 
+    # healthcheck:
+    #   test: ["CMD-SHELL", "curl -f http://localhost:3000/auth/sign_in || exit 1"]
+    #   interval: 30s
+    #   timeout: 15s
+    #   retries: 5
+    #   start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # CHATWOOT - Sidekiq (Background Jobs)
+  # ---------------------------------------------------------------------------
+  chatwoot-sidekiq:
+    image: chatwoot/chatwoot:latest
+    container_name: chatwoot-sidekiq
+    <<: *restart-policy
+    environment:
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      REDIS_URL: ${REDIS_URL}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      # POSTGRES_DB: ${POSTGRES_DB}
+      # POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE}
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    volumes:
+      - chatwoot-storage:/app/storage
+    networks:
+      - chatwoot-backend
+      - chatwoot-db
+    depends_on:
+      chatwoot-postgres:
+        condition: service_healthy
+      chatwoot-redis:
+        condition: service_healthy
+      chatwoot-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "bundle exec sidekiqmon processes | grep chatwoot-sidekiq || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # ESPOCRM - MariaDB
+  # ---------------------------------------------------------------------------
+  espocrm-mariadb:
+    image: mariadb:10.11
+    container_name: espocrm-mariadb
+    <<: *restart-policy
+    user: "999:999"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=256M
+      --max-allowed-packet=64M
+    volumes:
+      - espocrm-mariadb-data:/var/lib/mysql
+    networks:
+      - espocrm-db
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # ESPOCRM - Aplicação
+  # ---------------------------------------------------------------------------
+  espocrm:
+    image: espocrm/espocrm:latest
+    container_name: espocrm
+    <<: *restart-policy
+    environment:
+      ESPOCRM_DATABASE_HOST: ${ESPOCRM_DATABASE_HOST}
+      ESPOCRM_DATABASE_PORT: ${ESPOCRM_DATABASE_PORT}
+      ESPOCRM_DATABASE_NAME: ${ESPOCRM_DATABASE_NAME}
+      ESPOCRM_DATABASE_USER: ${ESPOCRM_DATABASE_USER}
+      ESPOCRM_DATABASE_PASSWORD: ${ESPOCRM_DATABASE_PASSWORD}
+      ESPOCRM_SITE_URL: https://${ESPOCRM_DOMAIN}
+      ESPOCRM_LANGUAGE: ${ESPOCRM_LANGUAGE}
+      TZ: ${TZ}
+      ESPOCRM_ADMIN_USERNAME: ${ESPOCRM_ADMIN_USERNAME}
+      ESPOCRM_ADMIN_PASSWORD: ${ESPOCRM_ADMIN_PASSWORD}
+    volumes:
+      # - espocrm-data:/var/www/html/data
+      - espocrm-data:/var/www/html
+    networks:
+      - traefik-public
+      - espocrm-backend
+      - espocrm-db
+    depends_on:
+      espocrm-mariadb:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.espocrm.rule=Host(`${ESPOCRM_DOMAIN}`)"
+      - "traefik.http.routers.espocrm.entrypoints=web"
+      - "traefik.http.services.espocrm.loadbalancer.server.port=80"
+      # - "traefik.http.routers.espocrm.middlewares=secure-headers@file,compress@file"
+      - "traefik.docker.network=traefik-public"
+
+      # - "traefik.enable=true"
+      # - "traefik.http.routers.espocrm.rule=Host(`${ESPOCRM_DOMAIN}`)"
+      # - "traefik.http.routers.espocrm.entrypoints=web"
+      # - "traefik.http.routers.espocrm.middlewares=secure-headers@file,compress@file"
+      # - "traefik.http.services.espocrm.loadbalancer.server.port=80"
+      # - "traefik.http.services.espocrm.loadbalancer.healthcheck.path=/api/v1/App/about"
+      # - "traefik.http.services.espocrm.loadbalancer.healthcheck.interval=30s"
+    healthcheck:
+      # test: ["CMD-SHELL", "curl -f http://localhost/index.php || exit 1"]
+      test: ["CMD-SHELL", "ps aux | grep '[a]pache2' || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # ESPOCRM - Daemon (Background Jobs)
+  # ---------------------------------------------------------------------------
+  espocrm-daemon:
+    image: espocrm/espocrm:latest
+    container_name: espocrm-daemon
+    <<: *restart-policy
+    environment:
+      ESPOCRM_LANGUAGE: ${ESPOCRM_LANGUAGE}
+      TZ: ${TZ}
+    command: ["php", "-f", "daemon.php"]
+    volumes:
+      - espocrm-data:/var/www/html
+    networks:
+      - espocrm-backend
+      - espocrm-db
+    depends_on:
+      espocrm-mariadb:
+        condition: service_healthy
+      espocrm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'daemon.php' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # ESPOCRM - Websocket (opcional, para notificações em tempo real)
+  # ---------------------------------------------------------------------------
+  espocrm-websocket:
+    image: espocrm/espocrm:latest
+    container_name: espocrm-websocket
+    <<: *restart-policy
+    environment:
+      ESPOCRM_CONFIG_USE_WEB_SOCKET: "true"
+      ESPOCRM_CONFIG_WEB_SOCKET_URL: "wss://${ESPOCRM_DOMAIN}/ws"
+      ESPOCRM_CONFIG_WEB_SOCKET_ZERO_M_Q_SUBSCRIBER_DSN: "tcp://*:7777"
+      ESPOCRM_CONFIG_WEB_SOCKET_ZERO_M_Q_SUBMISSION_DSN: "tcp://espocrm-websocket:7777"
+      ESPOCRM_LANGUAGE: ${ESPOCRM_LANGUAGE}
+      TZ: ${TZ}
+    command: ["php", "-f", "websocket.php"]
+    volumes:
+      - espocrm-data:/var/www/html
+    labels:
+      # - "traefik.enable=true"
+      # - "traefik.http.routers.espocrm-ws.rule=Host(`${ESPOCRM_DOMAIN}`)  && PathPrefix(`/ws`)"
+      # - "traefik.http.routers.espocrm-ws.entrypoints=web"
+      # - "traefik.http.services.espocrm-ws.loadbalancer.server.port=8080"
+      # - "traefik.docker.network=traefik-public"
+
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      
+      # Rota para capturar o tráfego no path /ws
+      - "traefik.http.routers.espocrm-ws.rule=Host(`${ESPOCRM_DOMAIN}`) && PathPrefix(`/ws`)"
+      - "traefik.http.routers.espocrm-ws.entrypoints=websecure" # Recomendado usar a porta 443 (SSL)
+      - "traefik.http.routers.espocrm-ws.tls=true"
+      
+      # Porta interna que o container espocrm/espocrm usa para Websockets
+      - "traefik.http.services.espocrm-ws.loadbalancer.server.port=8080"
+      
+      # Middleware StripPrefix (Necessário se o websocket.php não esperar o prefixo /ws na URI)
+      - "traefik.http.middlewares.espocrm-ws-stripprefix.stripprefix.prefixes=/ws"
+      - "traefik.http.routers.espocrm-ws.middlewares=espocrm-ws-stripprefix"
+    networks:
+      - espocrm-backend
+      - espocrm-db
+      - traefik-public
+    depends_on:
+      espocrm-mariadb:
+        condition: service_healthy
+      espocrm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'websocket.php' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    logging: *default-logging
+
+
+# =============================================================================
+# REDES
+# =============================================================================
+networks:
+  traefik-public:
+    name: traefik-public
+    driver: bridge
+    external: true
+
+  chatwoot-backend:
+    name: chatwoot-backend
+    driver: bridge
+    internal: true
+
+  chatwoot-db:
+    name: chatwoot-db
+    driver: bridge
+    internal: true
+
+  espocrm-backend:
+    name: espocrm-backend
+    driver: bridge
+    internal: true
+
+  espocrm-db:
+    name: espocrm-db
+    driver: bridge
+    internal: true
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  chatwoot-storage:
+    name: chatwoot-storage
+
+  chatwoot-postgres-data:
+    name: chatwoot-postgres-data
+
+  chatwoot-redis-data:
+    name: chatwoot-redis-data
+
+  espocrm-data:
+    name: espocrm-data
+
+  espocrm-mariadb-data:
+    name: espocrm-mariadb-data

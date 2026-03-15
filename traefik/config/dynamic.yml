@@ -1,0 +1,60 @@
+# =============================================================================
+# TRAEFIK - CONFIGURAÇÃO DINÂMICA (dynamic.yml)
+# =============================================================================
+
+http:
+  middlewares:
+    secure-headers:
+      headers:
+        sslRedirect: true
+        stsSeconds: 63072000
+        browserXssFilter: true
+        contentTypeNosniff: true
+    compress:
+      compress: {}
+# http:
+#   middlewares:
+#     # Segurança - Headers HTTP
+#     secure-headers:
+#       headers:
+#         accessControlAllowMethods:
+#           - GET
+#           - OPTIONS
+#           - PUT
+#           - POST
+#           - DELETE
+#         accessControlMaxAge: 100
+#         hostsProxyHeaders:
+#           - "X-Forwarded-Host"
+#         # sslRedirect: true  <-- Removido daqui, deve ficar no traefik.yml (entryPoints)
+#         stsSeconds: 63072000
+#         stsIncludeSubdomains: true
+#         stsPreload: true
+#         forceSTSHeader: true
+#         customFrameOptionsValue: "SAMEORIGIN"
+#         contentTypeNosniff: true
+#         browserXssFilter: true
+#         referrerPolicy: "strict-origin-when-cross-origin"
+#         permissionsPolicy: "camera=(), microphone=(), geolocation=(), payment=()"
+#         customResponseHeaders:
+#           X-Powered-By: ""
+#           server: ""
+
+#     # Rate Limiting
+#     rate-limit:
+#       rateLimit:
+#         average: 100
+#         burst: 50
+#         period: 1s
+
+#     # Compressão
+#     compress:
+#       compress: {}
+
+#     # Dashboard Basic Auth
+#     # Certifique-se de que o valor abaixo está entre aspas simples para não 
+#     # ser interpretado pelo YAML como variáveis especiais
+#     dashboard-auth:
+#       basicAuth:
+#         users:
+#           - 'admin:$apr1$JKuoJ8QX$Mas1PPIWiGus4ZNEcZju80'
