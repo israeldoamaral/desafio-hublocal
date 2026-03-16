@@ -103,19 +103,6 @@
 - **ACM**: Certificado SSL wildcard para `*.seudominio.com` emitido na região correta
 - **Security Group**: Portas 22, 80 e 443 abertas
 
-### Software no servidor
-
-```bash
-# Docker Engine 24+
-curl -fsSL https://get.docker.com | sh
-
-# Docker Compose plugin
-sudo apt-get install docker-compose-plugin
-
-# Ferramentas auxiliares
-sudo apt-get install -y ufw htpasswd curl git unzip awscli
-```
-
 ---
 
 ## 📁 Estrutura do Projeto
@@ -168,38 +155,33 @@ O Docker Compose tem dois contextos distintos de leitura de variáveis:
 # Atualizar o sistema
 sudo apt-get update && sudo apt-get upgrade -y
 
+# Instalar ferramentas
+sudo apt-get install -y apache2-utils curl git unzip ufw
+
 # Instalar Docker
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 newgrp docker
 
-# Instalar Docker Compose plugin
-sudo apt-get install -y docker-compose-plugin
-
-# Instalar ferramentas
-sudo apt-get install -y apache2-utils curl git unzip
 
 # Verificar instalações
 docker --version
 docker compose version
 ```
 
-### 2. Configurar Firewall (UFW)
+### 2. Configurar Security Groups na AWS
 
-```bash
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
+O controle de acesso é feito inteiramente via Security Groups da AWS — não é necessário instalar UFW na instância.
 
-# SSH (OBRIGATÓRIO - não feche antes de testar)
-sudo ufw allow 22/tcp comment 'SSH'
+**Security Group do ALB:**
+- Porta 443 TCP — origem `0.0.0.0/0`
+- Porta 80 TCP — origem `0.0.0.0/0` (o listener redireciona para 443)
 
-# HTTP e HTTPS
-sudo ufw allow 80/tcp  comment 'HTTP - redirecionamento para HTTPS'
-sudo ufw allow 443/tcp comment 'HTTPS - tráfego principal'
+**Security Group da EC2:**
+- Porta 22 TCP — origem: seu IP de gestão
+- Porta 80 TCP — origem: Security Group do ALB (não da internet)
 
-sudo ufw enable
-sudo ufw status verbose
-```
+> Para referenciar o Security Group do ALB como origem na regra da EC2, use o ID do SG do ALB no campo "Source" — ex: `sg-0abc123def456`. Isso garante que apenas o ALB pode encaminhar tráfego para a instância.
 
 ### 3. Configurar autenticação SSH (desabilitar senha)
 
@@ -210,32 +192,23 @@ echo "ssh-rsa CHAVE_PUBLICA_DO_AVALIADOR" >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 
 # Desabilitar autenticação por senha
-sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#PasswordAuthentication no/PasswordAuthentication no/'  /etc/ssh/sshd_config
-sudo systemctl restart sshd
+sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh
 ```
 
 ### 4. Clonar e configurar o projeto
 
 ```bash
 # Clonar repositório
-git clone https://github.com/seu-usuario/seu-repo.git /opt/stack
-cd /opt/stack
+git clone https://github.com/israeldoamaral/desafio-hublocal.git stack
+cd stack
 
-# .env raiz — ajustar os domínios (não contém segredos)
+# Renomeie o .env.exemplo para .env
+mv .env.exemplo .env
+
+# .env raiz — ajustar os valores das variaveis (não contém segredos)
 nano .env
 
-# Criar arquivo .env do Traefik (credenciais do dashboard)
-cp traefik/.env.example traefik/.env
-nano traefik/.env
-
-# Criar arquivo .env do Chatwoot
-cp chatwoot/.env.example chatwoot/.env
-nano chatwoot/.env
-
-# Criar arquivo .env do EspoCRM
-cp espocrm/.env.example espocrm/.env
-nano espocrm/.env
 ```
 
 ### 5. Gerar valores seguros para as variáveis
@@ -253,19 +226,10 @@ htpasswd -nb admin 'SUA_SENHA_AQUI' | sed -e 's/\$/\$\$/g'
 # Cole o resultado em TRAEFIK_DASHBOARD_PASSWORD_HASH e em dynamic.yml
 ```
 
-### 6. Configurar permissões do acme.json
-
-```bash
-# Criar arquivo acme.json com as permissões corretas
-docker volume create traefik-letsencrypt
-```
-
-> O Traefik gerencia o `acme.json` automaticamente via volume. Não é necessário criar o arquivo manualmente.
-
 ### 7. Subir a stack
 
 ```bash
-cd /opt/stack
+cd stack
 
 # Criar redes externas (se necessário)
 docker network create traefik-public 2>/dev/null || true
@@ -275,30 +239,6 @@ docker compose up -d
 
 # Acompanhar logs (aguardar inicialização completa ~2 min)
 docker compose logs -f --tail=50
-```
-
-### 8. Inicializar banco de dados do Chatwoot
-
-```bash
-# Rodar migrations e seed inicial (apenas na primeira vez)
-docker compose exec chatwoot-web \
-  bundle exec rails db:chatwoot_prepare
-
-# Criar usuário administrador
-docker compose exec chatwoot-web \
-  bundle exec rails console <<'EOF'
-account = Account.first || Account.create!(name: "Minha Empresa")
-user = User.new(
-  name: "Administrador",
-  email: "admin@seudominio.com",
-  password: "SenhaForte@123",
-  password_confirmation: "SenhaForte@123",
-  role: :administrator
-)
-user.save!
-AccountUser.create!(user: user, account: account, role: :administrator)
-puts "Usuário criado: #{user.email}"
-EOF
 ```
 
 ### 9. Verificar saúde dos serviços
@@ -317,12 +257,7 @@ docker inspect --format='{{.State.Health.Status}}' traefik
 
 ### 10. Configurar EspoCRM (pós-instalação)
 
-Acesse `https://crm.seudominio.com` no navegador e siga o assistente de instalação:
-
-1. **Banco de dados**: preencha com os dados do `espocrm/.env`
-2. **Administrador**: defina usuário e senha
-3. **Idioma**: selecione **Português (Brasil)**
-4. **SMTP**: configure nas Configurações → Email → Configurações de envio
+1. **SMTP**: configure nas Configurações → Email → Configurações de envio
 
 ---
 
@@ -370,8 +305,8 @@ O Chatwoot suporta TOTP nativo. Para habilitar:
 
 ```bash
 # Tornar scripts executáveis
-chmod +x /opt/stack/scripts/backup.sh
-chmod +x /opt/stack/scripts/restore.sh
+chmod +x stack/scripts/backup.sh
+chmod +x stack/scripts/restore.sh
 
 # Criar diretório de backups
 sudo mkdir -p /opt/backups/docker-volumes
@@ -524,13 +459,13 @@ Ubuntu 22.04 LTS (Jammy) foi escolhido por ser o sistema suportado oficialmente 
 
 ### Por que Traefik v3 ao invés de Nginx Proxy Manager?
 
-| Critério | Traefik v3 | Nginx Proxy Manager |
-|----------|------------|---------------------|
-| Auto-discovery Docker | ✅ Nativo via labels | ❌ Manual |
-| Integração ACM/ALB | ✅ Transparente (HTTP interno) | ✅ Via UI |
-| Configuração como código | ✅ YAML + Labels | ❌ GUI-driven |
-| Métricas Prometheus | ✅ Nativo | ❌ Plugin |
-| Overhead de memória | ~30 MB | ~150 MB |
+| Critério                 | Traefik v3                       | Nginx Proxy Manager |
+|--------------------------|----------------------------------|---------------------|
+| Auto-discovery Docker    | ✅ Nativo via labels             | ❌ Manual           |
+| Integração ACM/ALB       | ✅ Transparente (HTTP interno)   | ✅ Via UI           |
+| Configuração como código | ✅ YAML + Labels                 | ❌ GUI-driven       |
+| Métricas Prometheus      | ✅ Nativo                        | ❌ Plugin           |
+| Overhead de memória      | ~30 MB                           | ~150 MB             |
 
 O Traefik v3 se integra nativamente ao Docker via socket, detecta novos containers automaticamente por labels e opera como proxy HTTP puro atrás do ALB — que termina o TLS com o certificado ACM.
 
@@ -554,20 +489,42 @@ A criação de redes separadas (`chatwoot-db`, `espocrm-db` como `internal: true
 
 ## 🔥 Firewall — Portas Abertas
 
+### Por que não usar UFW na instância EC2?
+
+Em ambientes AWS com ALB, o controle de tráfego é feito em duas camadas gerenciadas pela própria AWS, tornando o UFW redundante e desnecessário:
+
+- **Security Group do ALB**: controla o que entra da internet para o ALB (portas 80 e 443)
+- **Security Group da EC2**: controla o que o ALB pode encaminhar para a instância
+
+O UFW opera no nível do sistema operacional, depois que o pacote já chegou na instância. Com Security Groups, o pacote nem chega — é bloqueado na borda da infraestrutura AWS, o que é mais eficiente e seguro.
+
+Adicionar UFW em cima dos Security Groups criaria dupla camada de regras para manter sincronizadas, aumentando o risco de erro humano sem ganho real de segurança.
+
+### Security Group — ALB
+
 | Porta | Protocolo | Origem | Justificativa |
 |-------|-----------|--------|---------------|
-| 22 | TCP | IP do gestor | SSH — acesso administrativo |
-| 80 | TCP | 0.0.0.0/0 | HTTP — redireciona para HTTPS |
-| 443 | TCP | 0.0.0.0/0 | HTTPS — todo o tráfego da aplicação |
+| 80 | TCP | 0.0.0.0/0 | HTTP — redireciona para HTTPS no listener do ALB |
+| 443 | TCP | 0.0.0.0/0 | HTTPS — tráfego principal com certificado ACM |
+
+### Security Group — EC2
+
+| Porta | Protocolo | Origem | Justificativa |
+|-------|-----------|--------|---------------|
+| 22 | TCP | IP do gestor | SSH — acesso administrativo direto |
+| 80 | TCP | Security Group do ALB | Tráfego HTTP encaminhado pelo ALB para o Traefik |
+
+> A porta 80 da EC2 só aceita tráfego originado do Security Group do ALB — nunca diretamente da internet. Isso garante que todo o tráfego passa obrigatoriamente pelo ALB e pelo certificado ACM.
 
 **Portas fechadas intencionalmente:**
 
 | Porta | Serviço | Motivo |
 |-------|---------|--------|
-| 5432 | PostgreSQL | Acesso apenas via rede Docker interna |
-| 6379 | Redis | Acesso apenas via rede Docker interna |
-| 3306 | MariaDB | Acesso apenas via rede Docker interna |
-| 8080 | Traefik API | Dashboard apenas via HTTPS com autenticação |
+| 443 | HTTPS direto na EC2 | TLS é terminado no ALB, não na instância |
+| 5432 | PostgreSQL | Acessível apenas via rede Docker interna |
+| 6379 | Redis | Acessível apenas via rede Docker interna |
+| 3306 | MariaDB | Acessível apenas via rede Docker interna |
+| 8080 | Traefik API | Dashboard acessível apenas via roteamento interno do Traefik com autenticação |
 
 ---
 
@@ -596,17 +553,8 @@ docker inspect chatwoot-web | grep -A 10 Networks
 
 **Solução**: Confirme que o serviço tem `traefik.enable=true` nas labels e está na rede `traefik-public` no `docker-compose.yml`.
 
-### 3. EspoCRM: tela branca após instalação
 
-**Causa**: Permissões incorretas nos diretórios de cache/data.
-
-**Solução**:
-```bash
-docker compose exec espocrm chown -R www-data:www-data /var/www/html/data
-docker compose restart espocrm
-```
-
-### 4. Redis: `WRONGPASS` no Chatwoot
+### 3. Redis: `WRONGPASS` no Chatwoot
 
 **Causa**: Senha do Redis no `.env` não corresponde à configurada no container.
 
@@ -616,13 +564,6 @@ docker compose restart espocrm
 docker compose up -d --force-recreate chatwoot-redis
 ```
 
-### 5. MariaDB: `user '999' can not access`
-
-**Causa**: A imagem oficial do MariaDB pode não suportar `user: "999:999"` em todas as versões.
-
-**Solução**: Remova a diretiva `user` do `espocrm-mariadb` no `docker-compose.yml` se ocorrer esse erro, e configure permissões via entrypoint customizado.
-
----
 
 ## 🤖 Uso de IA no Projeto
 
