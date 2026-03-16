@@ -83,13 +83,13 @@
 
 ### Volumes Docker
 
-| Volume | Serviço | Conteúdo |
-|--------|---------|----------|
-| `chatwoot-postgres-data` | PostgreSQL | Banco de dados do Chatwoot |
-| `chatwoot-redis-data` | Redis | Cache e filas do Sidekiq |
-| `chatwoot-storage` | Chatwoot | Arquivos enviados pelos usuários |
-| `espocrm-mariadb-data` | MariaDB | Banco de dados do EspoCRM |
-| `espocrm-data` | EspoCRM | Arquivos, configurações e uploads |
+| Volume                   | Serviço    | Conteúdo                          |
+|--------------------------|------------|-----------------------------------|
+| `chatwoot-postgres-data` | PostgreSQL | Banco de dados do Chatwoot        |
+| `chatwoot-redis-data`    | Redis      | Cache e filas do Sidekiq          |
+| `chatwoot-storage`       | Chatwoot   | Arquivos enviados pelos usuários  |
+| `espocrm-mariadb-data`   | MariaDB    | Banco de dados do EspoCRM         |
+| `espocrm-data`           | EspoCRM    | Arquivos, configurações e uploads |
 
 ---
 
@@ -114,16 +114,9 @@
 ├── .gitignore                  # Arquivos ignorados pelo Git
 │
 ├── traefik/
-│   ├── .env                    # Credenciais do dashboard (NÃO commitar)
 │   └── config/
 │       ├── traefik.yml         # Configuração estática do Traefik
 │       └── dynamic.yml         # Middlewares, headers de segurança
-│
-├── chatwoot/
-│   └── .env                    # Variáveis do Chatwoot (NÃO commitar)
-│
-├── espocrm/
-│   └── .env                    # Variáveis do EspoCRM (NÃO commitar)
 │
 └── scripts/
     ├── backup.sh               # Script de backup automatizado
@@ -138,13 +131,16 @@ O Docker Compose tem dois contextos distintos de leitura de variáveis:
 
 - **Variáveis injetadas dentro do container** (senhas, URLs, tokens): essas são declaradas via `env_file` em cada serviço e ficam nos `.env` de cada pasta.
 
-| Arquivo | Contém | Commitar? |
-|---|---|---|
-| `.env` (raiz) | Domínios apenas | ✅ Sim (sem segredos) |
-| `traefik/.env` | Hash de senha do dashboard | ❌ Não |
-| `chatwoot/.env` | Senhas, tokens, SMTP | ❌ Não |
-| `espocrm/.env` | Senhas, tokens, SMTP | ❌ Não |
-
+| Arquivo               | Contém                     | Commitar?            |
+|-----------------------|----------------------------|----------------------|
+| `.env` (raiz)         | Domínios, senha etc        | ❌ Não (com senhas)  |
+| `traefik/traefik.yml` | Configurações Estáticas    | ✅ Sim (sem segredos)|
+| `scripts/dynamic.yml` | Configurações Dinâmicas    | ✅ Sim (sem segredos)|
+| `scripts/backup.sh`   | Comandos Shell             | ✅ Sim (sem segredos)|
+| `scripts/restore.sh`  | Comandos Shell             | ✅ Sim (sem segredos)|
+| `docker-compose.yml`  | Comandos docker-compose    | ✅ Sim (sem segredos)|
+| `.gitignore`          | Regras para o repositório  | ✅ Sim (sem segredos)|
+| `READMME.md`          | Documentação               | ✅ Sim (sem segredos)|
 ---
 
 ## 🛠️ Instalação Passo a Passo
