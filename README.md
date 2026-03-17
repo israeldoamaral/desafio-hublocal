@@ -295,14 +295,14 @@ O Chatwoot suporta TOTP nativo. Para habilitar:
 
 ---
 
-## 💾 Backup e Restore
-
-### Configurar backup automático via Cron
-
-```bash
-# Tornar scripts executáveis
-chmod +x stack/scripts/backup.sh
-chmod +x stack/scripts/restore.sh
+💾 Backup e Restore
+Volumes cobertos pelos scripts
+Arquivo de backup geradoVolume / OrigemServiçochatwoot-postgres_<TS>.sql.gzchatwoot-postgres-dataPostgreSQL via pg_dumpchatwoot-storage_<TS>.tar.gzchatwoot-storageArquivos enviados pelos usuáriosespocrm-mariadb_<TS>.sql.gzespocrm-mariadb-dataMariaDB via mysqldumpespocrm-data_<TS>.tar.gzespocrm-dataArquivos, configs e uploads do EspoCRM
+As credenciais dos bancos são lidas automaticamente do .env na raiz do projeto (POSTGRES_USERNAME, POSTGRES_DATABASE, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE).
+Configurar backup automático via Cron
+bash# Tornar scripts executáveis
+chmod +x scripts/backup.sh
+chmod +x scripts/restore.sh
 
 # Criar diretório de backups
 sudo mkdir -p /opt/backups/docker-volumes
@@ -312,27 +312,22 @@ sudo chown $USER:$USER /opt/backups/docker-volumes
 sudo touch /var/log/backup.log
 sudo chown $USER:$USER /var/log/backup.log
 
-# Adicionar cron job (backup diário às 02:00)
+# Abrir o crontab para edição
 crontab -e
-```
-
 Adicione ao crontab:
-
-```cron
-# Backup completo da stack — diário às 02:00
+cron# Backup completo da stack — diário às 02:00
 0 2 * * * /opt/stack/scripts/backup.sh >> /var/log/backup.log 2>&1
 
-# Backup apenas do Chatwoot — diário às 02:30
+# Backup apenas do Chatwoot — diário às 02:30 (opcional)
 # 30 2 * * * /opt/stack/scripts/backup.sh chatwoot >> /var/log/backup.log 2>&1
 
-# Backup apenas do EspoCRM — diário às 02:45
+# Backup apenas do EspoCRM — diário às 02:45 (opcional)
 # 45 2 * * * /opt/stack/scripts/backup.sh espocrm >> /var/log/backup.log 2>&1
-```
 
-### Executar backup manualmente
+Os backups são retidos por 7 dias por padrão (RETENTION_DAYS=7 no script). Backups mais antigos são removidos automaticamente ao final de cada execução.
 
-```bash
-# Backup completo
+Executar backup manualmente
+bash# Backup completo (Chatwoot + EspoCRM)
 ./scripts/backup.sh
 
 # Backup apenas do Chatwoot
@@ -340,59 +335,48 @@ Adicione ao crontab:
 
 # Backup apenas do EspoCRM
 ./scripts/backup.sh espocrm
-```
-
-### Listar backups disponíveis
-
-```bash
-./scripts/restore.sh --list
-```
-
+Listar backups disponíveis
+bash./scripts/restore.sh --list
 Saída de exemplo:
-```
-ARQUIVO                                      TAMANHO    DATA
-─────────────────────────────────────────────────────────────────
-chatwoot-postgres_20250101_020000.sql.gz      45.2 MB   2025-01-01 02:00
-chatwoot-storage_20250101_020001.tar.gz      128.7 MB   2025-01-01 02:00
-espocrm-mariadb_20250101_020005.sql.gz        12.3 MB   2025-01-01 02:00
-espocrm-data_20250101_020006.tar.gz           31.5 MB   2025-01-01 02:00
-```
+ARQUIVO                                               TAMANHO    DATA
+──────────────────────────────────────────────────────────────────────
+chatwoot-postgres_20250101_020000.sql.gz               45.2 MB   2025-01-01 02:00
+chatwoot-storage_20250101_020000.tar.gz               128.7 MB   2025-01-01 02:00
+espocrm-mariadb_20250101_020000.sql.gz                 12.3 MB   2025-01-01 02:00
+espocrm-data_20250101_020000.tar.gz                    31.5 MB   2025-01-01 02:00
+Procedimento de Restore via script
 
-### Procedimento de Restore
+⚠️ ATENÇÃO: O restore sobrescreve os dados atuais. Execute apenas em manutenção planejada.
 
-> ⚠️ **ATENÇÃO**: O restore **sobrescreve** os dados atuais. Execute apenas em manutenção planejada.
-
-```bash
-# Restaurar Chatwoot a partir de backup de 01/01/2025 às 02:00
+bash# Restaurar Chatwoot a partir do backup de 01/01/2025 às 02:00
 ./scripts/restore.sh --service chatwoot --date 20250101_020000
 
-# Restaurar EspoCRM
+# Restaurar EspoCRM a partir do mesmo backup
 ./scripts/restore.sh --service espocrm --date 20250101_020000
-```
+O script executa os seguintes passos:
 
-O script irá:
-1. Exibir um aviso e solicitar confirmação digitando `CONFIRMAR`
-2. Parar os containers do serviço selecionado
-3. Restaurar o banco de dados (dump SQL)
-4. Restaurar o volume de dados (tar.gz)
-5. Reiniciar os containers automaticamente
+Exibe aviso de operação destrutiva e solicita confirmação digitando CONFIRMAR
+Para os containers da aplicação (chatwoot-web, chatwoot-sidekiq ou espocrm, espocrm-daemon, espocrm-websocket)
+Restaura o banco de dados a partir do dump SQL (.sql.gz)
+Restaura o volume de dados/arquivos a partir do tar (.tar.gz), se o arquivo existir
+Reinicia os containers automaticamente
 
-### Restore manual (banco de dados)
 
-```bash
-# PostgreSQL (Chatwoot)
+O banco de dados (chatwoot-postgres / espocrm-mariadb) permanece em execução durante o restore do SQL — apenas os containers de aplicação são parados.
+
+Restore manual — banco de dados
+bash# PostgreSQL (Chatwoot)
+# Variáveis: POSTGRES_USERNAME=chatwoot | POSTGRES_DATABASE=chatwoot_production
 zcat /opt/backups/docker-volumes/chatwoot-postgres_TIMESTAMP.sql.gz \
   | docker exec -i chatwoot-postgres psql -U chatwoot -d chatwoot_production
 
 # MariaDB (EspoCRM)
+# Variáveis: MYSQL_USER=espocrm | MYSQL_DATABASE=espocrm
 zcat /opt/backups/docker-volumes/espocrm-mariadb_TIMESTAMP.sql.gz \
-  | docker exec -i espocrm-mariadb mysql -u espocrm -pSENHA espocrm
-```
-
-### Restore manual (volume)
-
-```bash
-# Parar os serviços que usam o volume
+  | docker exec -i espocrm-mariadb mysql -u espocrm -pSUA_SENHA espocrm
+Restore manual — volume de arquivos
+bash# --- Chatwoot: volume chatwoot-storage ---
+# Parar aplicação
 docker compose stop chatwoot-web chatwoot-sidekiq
 
 # Restaurar volume
@@ -400,10 +384,24 @@ docker run --rm \
   -v chatwoot-storage:/data \
   -v /opt/backups/docker-volumes:/backup:ro \
   alpine:latest \
-  tar xzf /backup/chatwoot-storage_TIMESTAMP.tar.gz -C /data
+  sh -c "rm -rf /data/* /data/.* 2>/dev/null; tar xzf /backup/chatwoot-storage_TIMESTAMP.tar.gz -C /data"
 
-# Reiniciar serviços
+# Reiniciar
 docker compose start chatwoot-web chatwoot-sidekiq
+
+# --- EspoCRM: volume espocrm-data ---
+# Parar aplicação
+docker compose stop espocrm espocrm-daemon espocrm-websocket
+
+# Restaurar volume
+docker run --rm \
+  -v espocrm-data:/data \
+  -v /opt/backups/docker-volumes:/backup:ro \
+  alpine:latest \
+  sh -c "rm -rf /data/* /data/.* 2>/dev/null; tar xzf /backup/espocrm-data_TIMESTAMP.tar.gz -C /data"
+
+# Reiniciar
+docker compose start espocrm espocrm-daemon espocrm-websocket
 ```
 
 ---
